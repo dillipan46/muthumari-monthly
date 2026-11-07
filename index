@@ -1,0 +1,219 @@
+<meta name='viewport' content='width=device-width, initial-scale=1'/><!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Contribution Entry</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { font-family: Arial, sans-serif; background: #f4f4f4; padding: 15px; }
+    .card { background: #fff; padding: 15px; border-radius: 8px; }
+    .radio-group { display: flex; gap: 15px; margin-bottom: 10px; }
+    input[type="date"], input[type="number"] { width: 100%; padding: 10px; margin-top: 10px; font-size: 14px; box-sizing: border-box; }
+    
+    /* Dual Button Layout Grid */
+    .btn-group { display: flex; flex-direction: column; gap: 10px; margin-top: 15px; }
+    button { width: 100%; padding: 14px; font-size: 16px; color: #fff; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; }
+    
+    #saveBtn { background: #007bff; } /* Blue Sync Button */
+    #saveBtn:disabled { background: #b3d7ff; cursor: not-allowed; }
+    
+    #whatsappBtn { background: #25D366; } /* WhatsApp Green Button */
+    #whatsappBtn:disabled { background: #a3eab8; cursor: not-allowed; opacity: 0.6; }
+
+    .dropdown { position: relative; margin-top: 10px; }
+    .dropdown-selected { border: 1px solid #ccc; padding: 10px; cursor: pointer; background: #fff; }
+    .dropdown-options { position: absolute; width: 100%; background: #fff; border: 1px solid #ccc; max-height: 220px; overflow-y: auto; display: none; z-index: 9999; }
+    .dropdown-options div { padding: 10px; cursor: pointer; }
+    .dropdown-options div:hover { background: #f0f0f0; }
+    .status { margin-top: 10px; font-size: 14px; min-height: 18px; }
+    .status.sync { color: orange; }
+    .status.success { color: green; }
+    .status.error { color: red; }
+  </style>
+</head>
+<body>
+
+  <div class="card">
+    <div class="radio-group">
+      <label><input type="radio" name="dateOption" value="today" checked onclick="toggleDate(false)"> Today</label>
+      <label><input type="radio" name="dateOption" value="pick" onclick="toggleDate(true)"> Pick Date</label>
+    </div>
+
+    <input type="date" id="pickedDate" disabled>
+
+    <div class="dropdown">
+      <div class="dropdown-selected" id="dropdownSelected">
+        👤 <span id="selectedMember">Select Member</span>
+      </div>
+      <div class="dropdown-options" id="dropdownOptions"></div>
+    </div>
+
+    <input type="number" id="amount" placeholder="Enter amount">
+
+    <!-- Separate Action Button Blocks -->
+    <div class="btn-group">
+      <button id="saveBtn" onclick="saveToSheet()">1. Save & Sync to Sheet</button>
+      <button id="whatsappBtn" onclick="sendWhatsApp()" disabled>2. Send WhatsApp Notification</button>
+    </div>
+
+    <div class="status" id="status"></div>
+  </div>
+
+  <script>
+    // ⚠️ PASTE YOUR CURRENT SCRIPT DEPLOYMENT EXEC WEB APP LINK HERE
+    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyLUcJPLobzfBsIjjxgzx2lmYkEKR34jocLXDyxvHRkw7eLSUj5Ju66izByqCZUiWGX/exec";
+    
+    let selectedMember = "";
+    let membersCache = [];
+
+    const dropdownSelected = document.getElementById("dropdownSelected");
+    const dropdownOptions = document.getElementById("dropdownOptions");
+    const statusDiv = document.getElementById("status");
+    const saveBtn = document.getElementById("saveBtn");
+    const whatsappBtn = document.getElementById("whatsappBtn");
+
+    window.onload = loadMembers;
+
+    dropdownSelected.onclick = e => {
+      e.stopPropagation();
+      dropdownOptions.style.display = dropdownOptions.style.display === "block" ? "none" : "block";
+    };
+    
+    document.addEventListener("click", () => dropdownOptions.style.display = "none");
+
+    function toggleDate(enable) {
+      document.getElementById("pickedDate").disabled = !enable;
+      loadMembers();
+    }
+
+    function loadMembers() {
+      showStatus("Syncing members...", "sync");
+      whatsappBtn.disabled = true; 
+      const opt = document.querySelector('input[name="dateOption"]:checked').value;
+      const dateVal = opt === "today" ? null : document.getElementById("pickedDate").value;
+      
+      fetch(`${SCRIPT_URL}?action=getNames&date=${dateVal || ""}`)
+        .then(r => r.json())
+        .then(list => {
+          if (list && list.status === "error") {
+            showStatus(list.message, "error");
+            alert("Error: " + list.message);
+            return;
+          }
+
+          membersCache = list;
+          dropdownOptions.innerHTML = "";
+          selectedMember = "";
+          document.getElementById("selectedMember").innerText = "Select Member";
+          document.getElementById("amount").value = "";
+          
+          if (!list || list.length === 0) {
+            const d = document.createElement("div");
+            d.textContent = "✅ All members completed";
+            d.style.color = "green";
+            dropdownOptions.appendChild(d);
+          } else {
+            list.forEach(item => {
+              const d = document.createElement("div");
+              d.textContent = "👤 " + item.name;
+              d.onclick = () => {
+                selectedMember = item.name;
+                document.getElementById("selectedMember").innerText = item.name;
+                document.getElementById("amount").value = item.defaultAmount || "";
+                dropdownOptions.style.display = "none";
+                whatsappBtn.disabled = true; // Lock step 2 until fresh sheet push completes
+              };
+              dropdownOptions.appendChild(d);
+            });
+          }
+          showStatus("Members synced", "success");
+        })
+        .catch((err) => {
+          console.error(err);
+          showStatus("Failed to sync members", "error");
+        });
+    }
+
+    function showStatus(msg, type) {
+      statusDiv.className = "status " + type;
+      statusDiv.innerText = msg;
+      if (type !== "sync") {
+        setTimeout(() => {
+          if (statusDiv.innerText === msg) {
+            statusDiv.innerText = "";
+            statusDiv.className = "status";
+          }
+        }, 4000);
+      }
+    }
+
+    function formatDate(dateStr) {
+      if (!dateStr) {
+        const d = new Date();
+        return `${String(d.getDate()).padStart(2,'0')}-${String(d.getMonth()+1).padStart(2,'0')}-${d.getFullYear()}`;
+      }
+      const [y,m,d] = dateStr.split("-");
+      return `${d}-${m}-${y}`;
+    }
+
+    /* ACTION BUTTON 1: PUSH DIRECTLY TO GOOGLE SHEET */
+    function saveToSheet() {
+      if (!selectedMember) return alert("Please select a member first.");
+      const amount = document.getElementById("amount").value;
+      if (!amount) return alert("Please enter an amount.");
+      
+      const opt = document.querySelector('input[name="dateOption"]:checked').value;
+      const dateVal = opt === "today" ? null : document.getElementById("pickedDate").value;
+      
+      saveBtn.disabled = true;
+      showStatus("Saving to Google Sheet...", "sync");
+
+      fetch(SCRIPT_URL, {
+        method: "POST",
+        body: JSON.stringify({ name: selectedMember, amount: amount, date: dateVal })
+      })
+      .then(r => r.json())
+      .then(res => {
+        saveBtn.disabled = false;
+        if (res.status === "success") {
+          showStatus("Saved successfully to sheet!", "success");
+          whatsappBtn.disabled = false; // Directly unlocks the WhatsApp Button
+        } else if (res.status === "already_exists") {
+          showStatus("Entry already exists for this month.", "error");
+        } else {
+          showStatus(res.message || "Error saving data.", "error");
+        }
+      })
+      .catch((err) => {
+        console.error(err);
+        saveBtn.disabled = false;
+        showStatus("Connection error while saving.", "error");
+      });
+    }
+
+    /* ACTION BUTTON 2: OPENS WHATSAPP USING LIVE INPUT FIELD VALUES DIRECTLY */
+    function sendWhatsApp() {
+      const name = selectedMember;
+      const amount = document.getElementById("amount").value;
+      
+      if (!name || !amount) {
+        return alert("Please ensure member and amount are filled.");
+      }
+      
+      const opt = document.querySelector('input[name="dateOption"]:checked').value;
+      const dateVal = opt === "today" ? null : document.getElementById("pickedDate").value;
+      const displayDate = formatDate(dateVal);
+      
+      const separator = "────────────────────";
+      const msg = `👤 *${name}*\n📅 ${displayDate}\n💰 *₹${amount}*\n${separator}`;
+      
+      // Native window action—runs instantly without waiting for async variables
+      window.open("https://wa.me/?text=" + encodeURIComponent(msg), "_blank");
+      
+      // Reset layout states cleanly after message dispatch
+      whatsappBtn.disabled = true; 
+      loadMembers();
+    }
+  </script>
+</body>
+</html>
